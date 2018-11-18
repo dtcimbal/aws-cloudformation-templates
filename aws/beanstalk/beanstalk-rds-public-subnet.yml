@@ -1,0 +1,152 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Creates a private and public subnets with NAT and Bastion EC2 instance
+Parameters:
+  ArtifactBucket:
+    Description:      S3 bucket to host the application source code.
+    Type:             String
+    MinLength:        2
+    ConstraintDescription:  must not be blank.
+  ArtifactKey:
+    Description:      S3 key to host the application
+    Type:             String
+    MinLength:        2
+    ConstraintDescription:  must not be blank.
+  DatabaseName:
+    Description:      The database name
+    Type:             String
+    Default:          cloudformationtemplate
+  DatabaseUsername:
+    Description:      The database user name
+    Type:             String
+    Default:          username
+  DatabasePassword:
+    Description:      The database user password
+    Type:             String
+    Default:          password
+  VpcCidr:
+    Description:      VPC CIDR
+    Type:             String
+    Default:          '10.0.0.0/16'
+  PublicSubnetACidr:
+    Description:      Public subnet CIDR
+    Type:             String
+    Default:          '10.0.0.0/24'
+  PublicSubnetBCidr:
+    Description:      Public subnet CIDR
+    Type:             String
+    Default:          '10.0.1.0/24'
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      CidrBlock: !Ref VpcCidr
+      Tags:
+      - Key: Application
+        Value:
+          Ref: 'AWS::StackName'
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs {Ref: 'AWS::Region'}]
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetACidr
+      MapPublicIpOnLaunch: true
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs {Ref: 'AWS::Region'}]
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetBCidr
+      MapPublicIpOnLaunch: true
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref Vpc
+      GroupDescription: Open database for access
+  DatabaseSecurityGroupTCPinbound:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DatabaseSecurityGroup
+      IpProtocol: tcp
+      FromPort: '3306'
+      ToPort: '3306'
+      SourceSecurityGroupId: !Ref BeanstalkSecurityGroup
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: RDS Cluster
+      SubnetIds:
+      # We need to fave at least two subnets in different AZ
+      - !Ref PublicSubnetA
+      - !Ref PublicSubnetB
+  DatabaseCluster:
+    Type: AWS::RDS::DBCluster
+    DependsOn:
+    - DatabaseSecurityGroup
+    DeletionPolicy: Delete
+    Properties:
+      DatabaseName: !Ref DatabaseName
+      MasterUsername: !Ref DatabaseUsername
+      MasterUserPassword: !Ref DatabasePassword
+      VpcSecurityGroupIds: [!GetAtt DatabaseSecurityGroup.GroupId]
+      Engine: aurora
+      EngineMode: serverless
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+  BeanstalkSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn:
+    - Vpc
+    Properties:
+      GroupDescription: Elastic Beanstalk security group
+      VpcId: !Ref Vpc
+  BeanstalkApplication:
+    Type: AWS::ElasticBeanstalk::Application
+    Properties:
+      Description: AWS Elastic Beanstalk Application
+  BeanstalkApplicationVersion:
+    Type: AWS::ElasticBeanstalk::ApplicationVersion
+    Properties:
+      ApplicationName: !Ref BeanstalkApplication
+      Description: AWS ElasticBeanstalk Application Version
+      SourceBundle:
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Ref ArtifactKey
+  BeanstalkConfigurationTemplate:
+    Type: AWS::ElasticBeanstalk::ConfigurationTemplate
+    Properties:
+      ApplicationName: !Ref BeanstalkApplication
+      Description: AWS ElasticBeanstalk Configuration
+      SolutionStackName: 64bit Amazon Linux 2018.03 v2.7.7 running Java 8
+      OptionSettings:
+      - Namespace: aws:autoscaling:asg
+        OptionName: MinSize
+        Value: '2'
+      - Namespace: aws:autoscaling:asg
+        OptionName: MaxSize
+        Value: '3'
+      - Namespace: aws:elasticbeanstalk:environment
+        OptionName: EnvironmentType
+        Value: LoadBalanced
+  BeanstalkEnvironment:
+    Type: AWS::ElasticBeanstalk::Environment
+    Properties:
+      ApplicationName:  !Ref BeanstalkApplication
+      Description: AWS ElasticBeanstalk Environment
+      TemplateName: !Ref BeanstalkConfigurationTemplate
+      VersionLabel: !Ref BeanstalkApplicationVersion
+      OptionSettings:
+      - Namespace: aws:autoscaling:launchconfiguration
+        OptionName: SecurityGroups
+        Value: !Ref BeanstalkSecurityGroup
+      - Namespace: aws:ec2:vpc
+        OptionName: VPCId
+        Value: !Ref Vpc
+      - Namespace: aws:ec2:vpc
+        OptionName: Subnets
+        Value: !Join [",", [!Ref PublicSubnetA, !Ref PublicSubnetB]]
+Outputs:
+  BeanstalkEnvironmentUrl:
+    Description: The URL of the Elastic Beanstalk environment
+    Value: !Join ["", ["http://", !GetAtt BeanstalkEnvironment.EndpointURL]]
