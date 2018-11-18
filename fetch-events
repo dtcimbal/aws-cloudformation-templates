@@ -1,0 +1,11 @@
+#!/bin/bash
+
+stack_name=${1}
+
+# Preserves deepest hierarchy level
+stack_name="${stack_name##*/}"
+
+# Drops template extension
+stack_name="${stack_name%%.*}"
+
+aws cloudformation describe-stack-events --stack-name ${stack_name}

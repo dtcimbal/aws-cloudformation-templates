@@ -1,0 +1,9 @@
+# Intellij generated files
+.idea/
+*.iml
+
+# Gradle
+.gradle/
+
+# A TODO file
+TODO

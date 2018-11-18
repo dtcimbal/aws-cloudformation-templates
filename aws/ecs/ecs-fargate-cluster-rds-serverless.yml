@@ -1,0 +1,550 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  RepositoryName:
+    Type:                   String
+    Description:            Name of the repository to use
+    MinLength:              2
+    ConstraintDescription:  must not be blank.
+
+  ImageName:
+    Type: String
+    Description:            Name of the docker imagee to use
+    MinLength:              2
+    ConstraintDescription:  must not be blank.
+
+  TaskCount:
+    Type:                   Number
+    Default:                2
+    Description:            How many tasks we want to launch
+
+  DatabaseName:
+    Description:            The database name
+    Type:                   String
+    Default:                cloudformationtemplate
+
+  DatabaseUsername:
+    Description:            The database user name
+    Type:                   String
+    Default:                username
+
+  DatabasePassword:
+    Description:            The database user password
+    Type:                   String
+    Default:                password
+
+  ContainerPort:
+    Type:                   Number
+    Default:                8080
+    Description:            What port number the application inside the docker container is binding to
+
+  ContainerCpu:
+    Type:                   Number
+    Default:                256
+    Description:            How much CPU to give the container. 1024 is 1 CPU
+
+  # 256 (.25 vCPU) – Available memory values: 512 (0.5 GB), 1024 (1 GB), 2048 (2 GB)
+  # 512 (.5 vCPU) – Available memory values: 1024 (1 GB), 2048 (2 GB), 3072 (3 GB), 4096 (4 GB)
+  # 1024 (1 vCPU) – Available memory values: 2048 (2 GB), 3072 (3 GB), 4096 (4 GB), 5120 (5 GB), 6144 (6 GB), 7168 (7 GB), 8192 (8 GB)
+  # 2048 (2 vCPU) – Available memory values: Between 4096 (4 GB) and 16384 (16 GB) in increments of 1024 (1 GB)
+  # 4096 (4 vCPU) – Available memory values: Between 819s2 (8 GB) and 30720 (30 GB) in increments of 1024 (1 GB)
+  ContainerMemory:
+    Type:                   Number
+    Default:                1024
+    Description:            How much memory in megabytes to give the container
+
+  VpcCidr:
+    Description:            VPC CIDR
+    Type:                   String
+    Default:                '10.0.0.0/16'
+
+  PublicSubnetACidr:
+    Description:            Public subnet CIDR
+    Type:                   String
+    Default:                '10.0.0.0/24'
+
+  PublicSubnetBCidr:
+    Description:            Public subnet CIDR
+    Type:                   String
+    Default:                '10.0.1.0/24'
+
+  Path:
+    Type:                   String
+    Default:                "*"
+    Description: A path on the public load balancer that this service
+      should be s to. Use * to send all load balancer
+      traffic to this service.
+
+  Priority:
+    Type:                   Number
+    Default:                1
+    Description:            The priority for the routing rule added to the load balancer.
+      This only applies if your have multiple services which have been
+      assigned to different paths on the load balancer.
+
+  BastionKeyPair:
+    Description:     EC2 KeyPair.
+    Type:           'AWS::EC2::KeyPair::KeyName'
+    MinLength:       2
+    ConstraintDescription:  must not be blank.
+
+  BastionInstanceType:
+    Description:    Amazon EC2 instance type.
+    Type:           String
+    Default:        "t2.micro"
+    AllowedValues:
+    - t2.micro
+    - t2.small
+    - t2.medium
+    - t2.large
+    - t2.xlarge
+    - t2.2xlarge
+    - m4.large
+    - m4.xlarge
+    - m4.2xlarge
+    - m4.4xlarge
+    - m4.10xlarge
+    - m4.16xlarge
+    - m5.large
+    - m5.xlarge
+    - m5.2xlarge
+    - m5.4xlarge
+    - m5.12xlarge
+    - m5.24xlarge
+    - m5d.large
+    - m5d.xlarge
+    - m5d.2xlarge
+    - m5d.4xlarge
+    - m5d.12xlarge
+    - m5d.24xlarge
+
+Mappings:
+  AWSRegionArch2AMI:
+    us-east-1:
+      HVM64: ami-6869aa05
+    us-west-2:
+      HVM64: ami-7172b611
+    us-west-1:
+      HVM64: ami-31490d51
+    eu-west-1:
+      HVM64: ami-f9dd458a
+    eu-central-1:
+      HVM64: ami-ea26ce85
+    ap-northeast-1:
+      HVM64: ami-374db956
+    ap-northeast-2:
+      HVM64: ami-2b408b45
+    ap-southeast-1:
+      HVM64: ami-a59b49c6
+    ap-southeast-2:
+      HVM64: ami-dc361ebf
+    ap-south-1:
+      HVM64: ami-ffbdd790
+    us-east-2:
+      HVM64: ami-f6035893
+    sa-east-1:
+      HVM64: ami-6dd04501
+    cn-north-1:
+      HVM64: ami-8e6aa0e3
+
+Resources:
+  # VPC in which containers will be networked. It has a public subnet
+  # Feel free to define more subnets to distribute them across multiple AZ,
+  # for high availability.
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      CidrBlock: !Ref VpcCidr
+  # Public subnets A and B, where containers can have public IP addresses
+  # We need at least two subnets in different AZ for ELB (load balancing)
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+        - 0
+        - Fn::GetAZs: {Ref: 'AWS::Region'}
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetACidr
+      MapPublicIpOnLaunch: true
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+        - 1
+        - Fn::GetAZs: {Ref: 'AWS::Region'}
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetBCidr
+      MapPublicIpOnLaunch: true
+
+  # Setup networking resources for the public subnets. Containers
+  # in the public subnets have public IP addresses and the routing table
+  # sends network traffic via the internet gateway.
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  GatewayAttachement:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachement
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  # This is an IAM role which authorizes ECS to manage resources on your
+  # account on your behalf, such as updating your load balancer with the
+  # details of where your containers are, so that traffic can reach your
+  # containers.
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [ecs.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: ecs-service
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            # Rules which allow ECS to attach network interfaces to instances
+            # on your behalf in order for awsvpc networking mode to work right
+            - 'ec2:AttachNetworkInterface'
+            - 'ec2:CreateNetworkInterface'
+            - 'ec2:CreateNetworkInterfacePermission'
+            - 'ec2:DeleteNetworkInterface'
+            - 'ec2:DeleteNetworkInterfacePermission'
+            - 'ec2:Describe*'
+            - 'ec2:DetachNetworkInterface'
+
+            # Rules which allow ECS to update load balancers on your behalf
+            # with the information sabout how to send traffic to your containers
+            - 'elasticloadbalancing:DeregisterInstancesFromLoadBalancer'
+            - 'elasticloadbalancing:DeregisterTargets'
+            - 'elasticloadbalancing:Describe*'
+            - 'elasticloadbalancing:RegisterInstancesWithLoadBalancer'
+            - 'elasticloadbalancing:RegisterTargets'
+            Resource: '*'
+
+  # This is a role which is used by the ECS tasks themselves.
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [ecs-tasks.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: AmazonECSTaskExecutionRolePolicy
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            # Allow the ECS Tasks to download images from ECR
+            - 'ecr:GetAuthorizationToken'
+            - 'ecr:BatchCheckLayerAvailability'
+            - 'ecr:GetDownloadUrlForLayer'
+            - 'ecr:BatchGetImage'
+
+            # Allow the ECS tasks to upload logs to CloudWatch
+            - 'logs:CreateLogStream'
+            - 'logs:PutLogEvents'
+            Resource: '*'
+
+  ElbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref Vpc
+      GroupDescription: ELB Security Group
+  # Internet traffic
+#  ElbSecurityGroupHTTPinbound:
+#    Type: AWS::EC2::SecurityGroupIngress
+#    Properties:
+#      GroupId: !Ref ElbSecurityGroup
+#      IpProtocol: tcp
+#      FromPort: '80'
+#      ToPort: '80'
+#      CidrIp: 0.0.0.0/0
+  # Allow access to ALB from anywhere on the internet
+  ElbSecurityGroupHTTPinbound:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ElbSecurityGroup
+      CidrIp: 0.0.0.0/0
+      IpProtocol: -1
+
+  EcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref Vpc
+      GroupDescription: ECS Security Group
+  # SSH traffic to reach the Bastion
+  EcsSecurityGroupSSHinbound:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EcsSecurityGroup
+      IpProtocol: tcp
+      FromPort: '22'
+      ToPort: '22'
+      CidrIp: 0.0.0.0/0
+# Internet traffic
+#  EcsSecurityGroupALBports:
+#    Type: AWS::EC2::SecurityGroupIngress
+#    Properties:
+#      GroupId: !Ref EcsSecurityGroup
+#      IpProtocol: tcp
+#      FromPort: '31000'
+#      ToPort: '61000'
+#      SourceSecurityGroupId: !Ref ElbSecurityGroup
+  # Internet traffic
+  EcsSecurityGroupALBports:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Ingress from the public ALB
+      GroupId: !Ref EcsSecurityGroup
+      IpProtocol: -1
+      SourceSecurityGroupId: !Ref ElbSecurityGroup
+# Local traffic
+#  EcsSecurityGroupECSports:
+#    Type: AWS::EC2::SecurityGroupIngress
+#    Properties:
+#      GroupId: !Ref EcsSecurityGroup
+#      IpProtocol: tcp
+#      FromPort: '31000'
+#      ToPort: '61000'
+#      SourceSecurityGroupId: !Ref EcsSecurityGroup
+  # Local traffic
+  EcsSecurityGroupIngressFromSelf:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Ingress from other containers in the same security group
+      GroupId: !Ref EcsSecurityGroup
+      IpProtocol: -1
+      SourceSecurityGroupId: !Ref EcsSecurityGroup
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref Vpc
+      GroupDescription: Open database for access
+  DBSecurityGroupTCPinbound:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DBSecurityGroup
+      IpProtocol: tcp
+      FromPort: '3306'
+      ToPort: '3306'
+      SourceSecurityGroupId: !Ref EcsSecurityGroup
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 7
+
+  # Bastion instance setup below
+#  BastionInstance:
+#    Type: AWS::EC2::Instance
+#    Properties:
+#      InstanceType: !Ref BastionInstanceType
+#      ImageId: !FindInMap [AWSRegionArch2AMI, !Ref 'AWS::Region', 'HVM64']
+#      NetworkInterfaces:
+#      - NetworkInterfaceId: !Ref PublicEth0
+#        DeviceIndex: '0'
+#      KeyName: !Ref BastionKeyPair
+#      Tags:
+#      - Key: Application
+#        Value:
+#          Ref: 'AWS::StackName'
+#  PublicEth0:
+#    Type: AWS::EC2::NetworkInterface
+#    Properties:
+#      Description: eth0
+#      GroupSet:
+#      - !Ref EcsSecurityGroup
+#      SourceDestCheck: 'true'
+#      SubnetId: !Ref PublicSubnetA
+#      Tags:
+#      - Key: Name
+#        Value: Interface 0
+#      - Key: Interface
+#        Value: eth0
+
+  # Database
+  # RDS setup could be different
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: RDS Cluster
+      SubnetIds:
+      # We need to fave at least two subnets in different AZ
+      - !Ref PublicSubnetA
+      - !Ref PublicSubnetB
+
+  # Serverless Aurora
+  DBCluster:
+    Type: AWS::RDS::DBCluster
+    DependsOn:
+    - DBSecurityGroup
+    DeletionPolicy: Delete
+    Properties:
+      DatabaseName: !Ref DatabaseName
+      MasterUsername: !Ref DatabaseUsername
+      MasterUserPassword: !Ref DatabasePassword
+      VpcSecurityGroupIds: [!GetAtt DBSecurityGroup.GroupId]
+      Engine: aurora
+      EngineMode: serverless
+      DBSubnetGroupName:
+        Ref: DBSubnetGroup
+
+  PublicLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+      - Key: idle_timeout.timeout_seconds
+        Value: '30'
+      Subnets:
+      # The load balancer is placed into the public subnets, so that traffic
+      # from the internet can reach the load balancer directly via the internet gateway
+      - !Ref PublicSubnetA
+      - !Ref PublicSubnetB
+      SecurityGroups:
+      - !Ref ElbSecurityGroup
+
+  # A target group. This is used for keeping track of all the tasks, and
+  # their IP addresses / port numbers. Usually target group is connected
+  # to an application/network load balancer, so
+  # it can automatically distribute traffic across all the targets.
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+    - PublicLoadBalancer
+    Properties:
+      HealthCheckIntervalSeconds: 6
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      TargetType: ip
+      Port: !Ref ContainerPort
+      Protocol: HTTP
+      VpcId: !Ref Vpc
+
+  PublicLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref TargetGroup
+        Type: 'forward'
+      LoadBalancerArn: !Ref PublicLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties: {}
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn:
+    - TaskRole
+    - TaskExecutionRole
+    Properties:
+      Cpu: !Ref ContainerCpu
+      Memory: !Ref ContainerMemory
+      RequiresCompatibilities:
+      - FARGATE
+      # TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      NetworkMode: awsvpc
+      ContainerDefinitions:
+      - Name: ECSContainer
+        Image: !Join [ '', [ !Ref 'AWS::AccountId','.dkr.ecr.',!Ref 'AWS::Region','.amazonaws.com/', !Ref RepositoryName, ':', !Ref ImageName ] ]
+        Cpu: !Ref ContainerCpu
+        PortMappings:
+        - ContainerPort: !Ref ContainerPort
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref LogGroup
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: !Ref AWS::StackName
+        Environment:
+        - Name: JAVA_OPTS
+          Value: '-Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses'
+        - Name: SPRING_PROFILES_ACTIVE
+          Value: 'prod,swagger,aws'
+        - Name: SPRING_DATASOURCE_URL
+          Value: !Join ['',['jdbc:', 'mysql' ,'://',!GetAtt DBCluster.Endpoint.Address ,':', !GetAtt DBCluster.Endpoint.Port,'/', !Ref DatabaseName]]
+        - Name: SPRING_DATASOURCE_USERNAME
+          Value: !Ref DatabaseUsername
+        - Name: SPRING_DATASOURCE_PASSWORD
+          Value: !Ref DatabasePassword
+        - Name: JHIPSTER_SLEEP
+          Value: '0'
+        - Name: CLOUD_AWS_STACK_NAME
+          Value: !Ref AWS::StackName
+        Essential: 'true'
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn:
+    - DBCluster
+    - PublicLoadBalancer
+    - EcsSecurityGroup
+    Properties:
+      Cluster: !Ref Cluster
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 75
+      DesiredCount: !Ref TaskCount
+      HealthCheckGracePeriodSeconds: 600
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+          - !GetAtt EcsSecurityGroup.GroupId
+          Subnets:
+          # We need to fave at least two subnets in different AZ
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+      TaskDefinition: !Ref TaskDefinition
+      LoadBalancers:
+      - ContainerName: ECSContainer
+        ContainerPort: !Ref ContainerPort
+        TargetGroupArn: !Ref TargetGroup
+
+Outputs:
+  LoadBalancerOutput:
+    Description: The external DNS address of the load-balanancer
+    Value: !GetAtt PublicLoadBalancer.DNSName
+

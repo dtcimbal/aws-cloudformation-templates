@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# Preserves deepest hierarchy level and drops file extension
+stack_name=${1##*/}
+stack_name=${stack_name%%.*}
+
+# Runs cloud formation
+aws cloudformation deploy --template-file $1 --stack-name ${stack_name} --capabilities CAPABILITY_IAM ${@:2}
