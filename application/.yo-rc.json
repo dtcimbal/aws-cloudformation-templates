@@ -1,0 +1,36 @@
+{
+  "generator-jhipster": {
+    "promptValues": {
+      "packageName": "service",
+      "nativeLanguage": "en"
+    },
+    "jhipsterVersion": "5.3.4",
+    "applicationType": "monolith",
+    "baseName": "service",
+    "packageName": "service",
+    "packageFolder": "service",
+    "serverPort": "8080",
+    "authenticationType": "jwt",
+    "cacheProvider": "no",
+    "websocket": false,
+    "databaseType": "sql",
+    "devDatabaseType": "h2Memory",
+    "prodDatabaseType": "mysql",
+    "searchEngine": false,
+    "messageBroker": false,
+    "serviceDiscoveryType": false,
+    "buildTool": "gradle",
+    "enableSwaggerCodegen": false,
+    "jwtSecretKey": "YWRhNDY5OWQ0N2NkY2UwOGMwZmU5ZmJiNjhkOGMyMTZiYjg1M2Y5NDI5ZDkwM2NlMjMzYzMyNzdkYTgwNWViNjVmNTlkNWMzMWNlNDAyOTNlZWFiNmZhZmM4NzhlODZmN2U1NDE3ZmY1NmU4ZTA3NjVkMTE2ZGYxZmFlMzkyZDc=",
+    "clientFramework": "react",
+    "useSass": true,
+    "clientPackageManager": "npm",
+    "testFrameworks": [],
+    "jhiPrefix": "jhi",
+    "enableTranslation": true,
+    "nativeLanguage": "en",
+    "languages": [
+      "en"
+    ]
+  }
+}
