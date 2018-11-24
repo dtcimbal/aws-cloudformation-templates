@@ -1,0 +1,223 @@
+
+# Created By Dmitrii Tcimbal / 21 Nov 2018 / Sydney
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Creates public subnet with a Beanstalk application and a private one with RDS cluster
+Parameters:
+  # Required parameters below
+  ArtifactBucket:
+    Description:      The S3 bucket where application package is located
+    Type:             String
+  ArtifactKey:
+    Description:      The application package S3 bucket
+    Type:             String
+
+  # Optional parameters below
+  BeanstalkStack:
+    Description:      The development stack of the amplicaation
+    Type:             String
+    Default:          spring
+
+  # Database related parameters below
+  DatabaseName:
+    Description:      The database name
+    Type:             String
+    Default:          cloudformationtemplate
+  DatabaseUsername:
+    Description:      The database user name
+    Type:             String
+    Default:          username
+  DatabasePassword:
+    Description:      The database user password
+    Type:             String
+    Default:          password
+  DatabaseEngine:
+    Description:      The database engine
+    Type:             String
+    Default:          aurora
+  DatabaseType:
+    Description:      The database type
+    Type:             String
+    Default:          mysql
+
+  # Network related parameters below
+  VpcCidr:
+    Description:      VPC CIDR
+    Type:             String
+    Default:          '10.0.0.0/16'
+  PublicSubnetCidr:
+    Description:      Public subnet CIDR
+    Type:             String
+    Default:          '10.0.0.0/24'
+  PrivateSubnetCidrOne:
+    Description:      Public subnet CIDR
+    Type:             String
+    Default:          '10.0.1.0/24'
+  PrivateSubnetCidrTwo:
+    Description:      Public subnet CIDR
+    Type:             String
+    Default:          '10.0.2.0/24'
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      CidrBlock: !Ref VpcCidr
+      Tags:
+      - Key: Application
+        Value:
+          Ref: 'AWS::StackName'
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  GatewayAttachement:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !Select [0, !GetAZs {Ref: 'AWS::Region'}]
+      Tags:
+      - Key: Application
+        Value: !Ref AWS::StackName
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachement
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId: !Ref PublicRouteTable
+      GatewayId: !Ref InternetGateway
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateSubnetAzOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PrivateSubnetCidrOne
+      AvailabilityZone: !Select [1, !GetAZs {Ref: 'AWS::Region'}]
+      Tags:
+      - Key: Application
+        Value: !Ref AWS::StackName
+      - Key: Network
+        Value: Private
+  PrivateSubnetAzTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PrivateSubnetCidrTwo
+      AvailabilityZone: !Select [2, !GetAZs {Ref: 'AWS::Region'}]
+      Tags:
+      - Key: Application
+        Value: !Ref AWS::StackName
+      - Key: Network
+        Value: Private
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+  PrivateRouteTableAssociationAzOne:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnetAzOne
+  PrivateRouteTableAssociationAzTwo:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnetAzTwo
+
+  PublicSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref Vpc
+      GroupDescription: SSH access
+      Tags:
+      - Key: Application
+        Value: !Ref AWS::StackName
+  PublicSecurityGroupSSHIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref PublicSecurityGroup
+      IpProtocol: tcp
+      FromPort: '22'
+      ToPort: '22'
+      CidrIp: 0.0.0.0/0
+  PublicSecurityGroupHTTP80Ingress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref PublicSecurityGroup
+      IpProtocol: tcp
+      FromPort: '80'
+      ToPort: '80'
+      CidrIp: 0.0.0.0/0
+  PublicSecurityGroupPrivateEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref PublicSecurityGroup
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      DestinationSecurityGroupId: !Ref PrivateSecurityGroup
+  PublicSecurityGroupPublicEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref PublicSecurityGroup
+      IpProtocol: -1
+      CidrIp: 0.0.0.0/0
+  PrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref Vpc
+      GroupDescription: Private Database Security Group
+      SecurityGroupIngress:
+      - IpProtocol: icmp
+        FromPort: -1
+        ToPort: -1
+        SourceSecurityGroupId: !Ref PublicSecurityGroup
+      - IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+        SourceSecurityGroupId: !Ref PublicSecurityGroup
+      - IpProtocol: udp
+        FromPort: 0
+        ToPort: 65535
+        SourceSecurityGroupId: !Ref PublicSecurityGroup
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: RDS Cluster
+      SubnetIds:
+      - !Ref PrivateSubnetAzOne
+      - !Ref PrivateSubnetAzTwo
+  # Serverless Aurora
+  DatabaseCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Delete
+    Properties:
+      DatabaseName: !Ref DatabaseName
+      MasterUsername: !Ref DatabaseUsername
+      MasterUserPassword: !Ref DatabasePassword
+      VpcSecurityGroupIds: [!Ref PrivateSecurityGroup]
+      Engine: aurora
+      EngineMode: serverless
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+
+Outputs:
+  JdbcConnectionUrl:
+    Description: The URL for database connection
+    Value: !Join ['',['jdbc:', !Ref DatabaseType,'://', !GetAtt DatabaseCluster.Endpoint.Address ,':',
+                      !GetAtt DatabaseCluster.Endpoint.Port,'/', !Ref DatabaseName]]
+
+

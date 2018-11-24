@@ -1,0 +1,195 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Creates public subnet with a Beanstalk application and a private one with RDS cluster
+Parameters:
+  ArtifactBucket:
+    Description:      The S3 bucket where application package is located
+    Type:             String
+    MinLength:        3
+  ArtifactKey:
+    Description:      The application package S3 bucket
+    Type:             String
+    MinLength:        3
+  BeanstalkStack:
+    Description:      The development stack of the amplicaation
+    Type:             String
+    Default:          spring
+  VpcCidr:
+    Description:      VPC CIDR
+    Type:             String
+    Default:          '10.0.0.0/16'
+  PublicSubnetCidr:
+    Description:      Public subnet CIDR
+    Type:             String
+    Default:          '10.0.0.0/24'
+Mappings:
+  BeanstalkStackName:
+    spring:
+      stackName: 64bit Amazon Linux 2018.03 v2.7.7 running Java 8
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      CidrBlock: !Ref VpcCidr
+      Tags:
+      - Key: Application
+        Value:
+          Ref: 'AWS::StackName'
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  GatewayAttachement:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !Select [0, !GetAZs {Ref: 'AWS::Region'}]
+      Tags:
+      - Key: Application
+        Value: !Ref AWS::StackName
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachement
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId: !Ref PublicRouteTable
+      GatewayId: !Ref InternetGateway
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+  PublicSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref Vpc
+      GroupDescription: SSH access
+      Tags:
+      - Key: Application
+        Value: !Ref AWS::StackName
+  PublicSecurityGroupSSHIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref PublicSecurityGroup
+      IpProtocol: tcp
+      FromPort: '22'
+      ToPort: '22'
+      CidrIp: 0.0.0.0/0
+  PublicSecurityGroupHTTP80Ingress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref PublicSecurityGroup
+      IpProtocol: tcp
+      FromPort: '80'
+      ToPort: '80'
+      CidrIp: 0.0.0.0/0
+  PublicSecurityGroupPrivateEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref PublicSecurityGroup
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      DestinationSecurityGroupId: !Ref PrivateSecurityGroup
+  PublicSecurityGroupPublicEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref PublicSecurityGroup
+      IpProtocol: -1
+      CidrIp: 0.0.0.0/0
+  PrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref Vpc
+      GroupDescription: Private Database Security Group
+      SecurityGroupIngress:
+      - IpProtocol: icmp
+        FromPort: -1
+        ToPort: -1
+        SourceSecurityGroupId: !Ref PublicSecurityGroup
+      - IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+        SourceSecurityGroupId: !Ref PublicSecurityGroup
+      - IpProtocol: udp
+        FromPort: 0
+        ToPort: 65535
+        SourceSecurityGroupId: !Ref PublicSecurityGroup
+  BeanstalkServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": { "Service": [ "elasticbeanstalk.amazonaws.com" ]},
+            "Action": [ "sts:AssumeRole" ]
+          }]
+        }
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth
+      - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkService
+  BeanstalkApplication:
+    Type: AWS::ElasticBeanstalk::Application
+    Properties:
+      Description: AWS Elastic Beanstalk Application
+  BeanstalkApplicationVersion:
+    Type: AWS::ElasticBeanstalk::ApplicationVersion
+    Properties:
+      ApplicationName: !Ref BeanstalkApplication
+      Description: AWS ElasticBeanstalk Application Version
+      SourceBundle:
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Ref ArtifactKey
+  BeanstalkConfigurationTemplate:
+    Type: AWS::ElasticBeanstalk::ConfigurationTemplate
+    Properties:
+      ApplicationName: !Ref BeanstalkApplication
+      Description: AWS ElasticBeanstalk Configuration
+      SolutionStackName: !FindInMap [BeanstalkStackName, !Ref BeanstalkStack, 'stackName']
+  BeanstalkEnvironment:
+    Type: AWS::ElasticBeanstalk::Environment
+    Properties:
+      ApplicationName:  !Ref BeanstalkApplication
+      Description: AWS ElasticBeanstalk Environment
+      TemplateName: !Ref BeanstalkConfigurationTemplate
+      VersionLabel: !Ref BeanstalkApplicationVersion
+      OptionSettings:
+      - Namespace: aws:elasticbeanstalk:environment
+        OptionName: EnvironmentType
+        Value: SingleInstance
+
+      - Namespace: aws:ec2:vpc
+        OptionName: Subnets
+        Value: !Ref PublicSubnet
+
+      - Namespace: aws:autoscaling:launchconfiguration
+        OptionName: SecurityGroups
+        Value: !Ref PublicSecurityGroup
+
+      - Namespace: aws:ec2:vpc
+        OptionName: VPCId
+        Value: !Ref Vpc
+
+      - Namespace: aws:elasticbeanstalk:environment
+        OptionName: ServiceRole
+        Value: !Ref BeanstalkServiceRole
+
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: SPRING_PROFILES_ACTIVE
+        Value: 'prod,swagger,aws'
+Outputs:
+  BeanstalkEnvironmentUrl:
+    Description: The URL of the Elastic Beanstalk environment
+    Value: !Join ["", ["http://", !GetAtt BeanstalkEnvironment.EndpointURL]]

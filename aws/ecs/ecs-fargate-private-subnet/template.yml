@@ -17,21 +17,6 @@ Parameters:
     Default:                2
     Description:            How many tasks we want to launch
 
-  DatabaseName:
-    Description:            The database name
-    Type:                   String
-    Default:                cloudformationtemplate
-
-  DatabaseUsername:
-    Description:            The database user name
-    Type:                   String
-    Default:                username
-
-  DatabasePassword:
-    Description:            The database user password
-    Type:                   String
-    Default:                password
-
   ContainerPort:
     Type:                   Number
     Default:                8080
@@ -81,83 +66,13 @@ Parameters:
       This only applies if your have multiple services which have been
       assigned to different paths on the load balancer.
 
-  BastionKeyPair:
-    Description:     EC2 KeyPair.
-    Type:           'AWS::EC2::KeyPair::KeyName'
-    MinLength:       2
-    ConstraintDescription:  must not be blank.
-
-  BastionInstanceType:
-    Description:    Amazon EC2 instance type.
-    Type:           String
-    Default:        "t2.micro"
-    AllowedValues:
-    - t2.micro
-    - t2.small
-    - t2.medium
-    - t2.large
-    - t2.xlarge
-    - t2.2xlarge
-    - m4.large
-    - m4.xlarge
-    - m4.2xlarge
-    - m4.4xlarge
-    - m4.10xlarge
-    - m4.16xlarge
-    - m5.large
-    - m5.xlarge
-    - m5.2xlarge
-    - m5.4xlarge
-    - m5.12xlarge
-    - m5.24xlarge
-    - m5d.large
-    - m5d.xlarge
-    - m5d.2xlarge
-    - m5d.4xlarge
-    - m5d.12xlarge
-    - m5d.24xlarge
-
-Mappings:
-  AWSRegionArch2AMI:
-    us-east-1:
-      HVM64: ami-6869aa05
-    us-west-2:
-      HVM64: ami-7172b611
-    us-west-1:
-      HVM64: ami-31490d51
-    eu-west-1:
-      HVM64: ami-f9dd458a
-    eu-central-1:
-      HVM64: ami-ea26ce85
-    ap-northeast-1:
-      HVM64: ami-374db956
-    ap-northeast-2:
-      HVM64: ami-2b408b45
-    ap-southeast-1:
-      HVM64: ami-a59b49c6
-    ap-southeast-2:
-      HVM64: ami-dc361ebf
-    ap-south-1:
-      HVM64: ami-ffbdd790
-    us-east-2:
-      HVM64: ami-f6035893
-    sa-east-1:
-      HVM64: ami-6dd04501
-    cn-north-1:
-      HVM64: ami-8e6aa0e3
-
 Resources:
-  # VPC in which containers will be networked. It has a public subnet
-  # Feel free to define more subnets to distribute them across multiple AZ,
-  # for high availability.
   Vpc:
     Type: AWS::EC2::VPC
     Properties:
       EnableDnsSupport: true
       EnableDnsHostnames: true
       CidrBlock: !Ref VpcCidr
-  # Public subnets A and B, where containers can have public IP addresses
-  # We need at least two subnets in different AZ for ELB (load balancing)
   PublicSubnetA:
     Type: AWS::EC2::Subnet
     Properties:
@@ -179,9 +94,6 @@ Resources:
       CidrBlock: !Ref PublicSubnetBCidr
       MapPublicIpOnLaunch: true
 
-  # Setup networking resources for the public subnets. Containers
-  # in the public subnets have public IP addresses and the routing table
-  # sends network traffic via the internet gateway.
   InternetGateway:
     Type: AWS::EC2::InternetGateway
   GatewayAttachement:
@@ -349,79 +261,10 @@ Resources:
       IpProtocol: -1
       SourceSecurityGroupId: !Ref EcsSecurityGroup
 
-  DBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      VpcId: !Ref Vpc
-      GroupDescription: Open database for access
-  DBSecurityGroupTCPinbound:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref DBSecurityGroup
-      IpProtocol: tcp
-      FromPort: '3306'
-      ToPort: '3306'
-      SourceSecurityGroupId: !Ref EcsSecurityGroup
-
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       RetentionInDays: 7
-
-  # Bastion instance setup below
-#  BastionInstance:
-#    Type: AWS::EC2::Instance
-#    Properties:
-#      InstanceType: !Ref BastionInstanceType
-#      ImageId: !FindInMap [AWSRegionArch2AMI, !Ref 'AWS::Region', 'HVM64']
-#      NetworkInterfaces:
-#      - NetworkInterfaceId: !Ref PublicEth0
-#        DeviceIndex: '0'
-#      KeyName: !Ref BastionKeyPair
-#      Tags:
-#      - Key: Application
-#        Value:
-#          Ref: 'AWS::StackName'
-#  PublicEth0:
-#    Type: AWS::EC2::NetworkInterface
-#    Properties:
-#      Description: eth0
-#      GroupSet:
-#      - !Ref EcsSecurityGroup
-#      SourceDestCheck: 'true'
-#      SubnetId: !Ref PublicSubnetA
-#      Tags:
-#      - Key: Name
-#        Value: Interface 0
-#      - Key: Interface
-#        Value: eth0
-
-  # Database
-  # RDS setup could be different
-  DBSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: RDS Cluster
-      SubnetIds:
-      # We need to fave at least two subnets in different AZ
-      - !Ref PublicSubnetA
-      - !Ref PublicSubnetB
-
-  # Serverless Aurora
-  DBCluster:
-    Type: AWS::RDS::DBCluster
-    DependsOn:
-    - DBSecurityGroup
-    DeletionPolicy: Delete
-    Properties:
-      DatabaseName: !Ref DatabaseName
-      MasterUsername: !Ref DatabaseUsername
-      MasterUserPassword: !Ref DatabasePassword
-      VpcSecurityGroupIds: [!GetAtt DBSecurityGroup.GroupId]
-      Engine: aurora
-      EngineMode: serverless
-      DBSubnetGroupName:
-        Ref: DBSubnetGroup
 
   PublicLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -502,12 +345,6 @@ Resources:
           Value: '-Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses'
         - Name: SPRING_PROFILES_ACTIVE
           Value: 'prod,swagger,aws'
-        - Name: SPRING_DATASOURCE_URL
-          Value: !Join ['',['jdbc:', 'mysql' ,'://',!GetAtt DBCluster.Endpoint.Address ,':', !GetAtt DBCluster.Endpoint.Port,'/', !Ref DatabaseName]]
-        - Name: SPRING_DATASOURCE_USERNAME
-          Value: !Ref DatabaseUsername
-        - Name: SPRING_DATASOURCE_PASSWORD
-          Value: !Ref DatabasePassword
         - Name: JHIPSTER_SLEEP
           Value: '0'
         - Name: CLOUD_AWS_STACK_NAME
@@ -517,7 +354,6 @@ Resources:
   Service:
     Type: AWS::ECS::Service
     DependsOn:
-    - DBCluster
     - PublicLoadBalancer
     - EcsSecurityGroup
     Properties:

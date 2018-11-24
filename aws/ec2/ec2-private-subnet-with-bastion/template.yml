@@ -1,7 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Creates a private and public subnets with NAT and Bastion EC2 instance
-#
-# Input params. `KeyPairName` is the only required one
 Parameters:
   KeyPairName:
     Description:     EC2 KeyPair.
@@ -28,11 +26,6 @@ Parameters:
     Description:    SSH location
     Type:           String
     Default:        '0.0.0.0/0'
-
-  EC2ImageId:
-    Description:    EC2 AMI Id
-    Type:           String
-    Default:        "ami-061e7ebbc234015fe"
 
   EC2InstanceType:
     Description:    Amazon EC2 instance type.
@@ -64,8 +57,36 @@ Parameters:
     - m5d.12xlarge
     - m5d.24xlarge
 
+Mappings:
+  Arch2AMI:
+    us-east-1:
+      HVM64: ami-6869aa05
+    us-west-2:
+      HVM64: ami-7172b611
+    us-west-1:
+      HVM64: ami-31490d51
+    eu-west-1:
+      HVM64: ami-f9dd458a
+    eu-central-1:
+      HVM64: ami-ea26ce85
+    ap-northeast-1:
+      HVM64: ami-374db956
+    ap-northeast-2:
+      HVM64: ami-2b408b45
+    ap-southeast-1:
+      HVM64: ami-a59b49c6
+    ap-southeast-2:
+      HVM64: ami-dc361ebf
+    ap-south-1:
+      HVM64: ami-ffbdd790
+    us-east-2:
+      HVM64: ami-f6035893
+    sa-east-1:
+      HVM64: ami-6dd04501
+    cn-north-1:
+      HVM64: ami-8e6aa0e3
+
 Resources:
-  # VPC setup below
   Vpc:
     Type: AWS::EC2::VPC
     Properties:
@@ -76,8 +97,6 @@ Resources:
       - Key: Application
         Value:
           Ref: 'AWS::StackName'
-
-  # Security groups setup below
   SSHSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -92,8 +111,6 @@ Resources:
       - Key: Application
         Value:
           Ref: 'AWS::StackName'
-
-  # Public subnet and Internet gateway setup below
   InternetGateway:
     Type: AWS::EC2::InternetGateway
   GatewayAttachement:
@@ -131,8 +148,6 @@ Resources:
     Properties:
       SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref PublicRouteTable
-
-  # Private subnet and NAT setup below
   NatGatewayAttachment:
     Type: AWS::EC2::EIP
     DependsOn: GatewayAttachement
@@ -171,17 +186,15 @@ Resources:
     Properties:
       RouteTableId: !Ref PrivateRouteTable
       SubnetId: !Ref PrivateSubnet
-
-  # Bastion instance setup below
   BastionInstance:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: !Ref EC2InstanceType
-      ImageId: !Ref EC2ImageId
+      ImageId: !FindInMap [Arch2AMI, !Ref 'AWS::Region', 'HVM64']
       NetworkInterfaces:
       - NetworkInterfaceId: !Ref PublicEth0
         DeviceIndex: '0'
-      KeyName: !Ref 'KeyPairName'
+      KeyName: !Ref KeyPairName
       Tags:
       - Key: Application
         Value:
@@ -206,7 +219,7 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: !Ref EC2InstanceType
-      ImageId: !Ref EC2ImageId
+      ImageId: !FindInMap [Arch2AMI, !Ref 'AWS::Region', 'HVM64']
       NetworkInterfaces:
       - NetworkInterfaceId: !Ref PrivateEth0
         DeviceIndex: '0'
@@ -229,14 +242,9 @@ Resources:
         Value: eth0
 
 Outputs:
-  VpcId:
-    Description: The ID of the VPC that this stack is deployed in
-    Value: !Ref Vpc
-    Export:
-      Name: !Join [ ':', [ !Ref 'AWS::StackName', 'VpcId' ] ]
-  PublicSubnet:
-    Description: Public subnet one
-    Value: !Ref PublicSubnet
-    Export:
-      Name: !Join [ ':', [ !Ref 'AWS::StackName', 'PublicSubnet' ] ]
-
+  BastionPublicUrl:
+    Description: The public URL of the bastion instance to establish SSH tunnel
+    Value: !GetAtt BastionInstance.PublicDnsName
+  PrivateInstanceIpAddress:
+    Description: The IP Address of the secure EC2 instance in a private subnet
+    Value: !GetAtt PrivateEC2Instance.PrivateIp
