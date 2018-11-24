@@ -1,4 +1,4 @@
-# Secure EC2 instance in a private subnet with the bastion
+# Secure EC2 instance in a private subnet with a bastion
 
 The template defines 
 - Secure EC2 instance in a private subnet
