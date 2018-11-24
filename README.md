@@ -3,7 +3,7 @@ The templates are addressed to different deployment cases and organized by AWS s
 Elastic Beanstalk, please go `./aws/ec2`, `./aws/ecs` or `./aws/beanstalk` to see the templates.
 
 You should be able to find a README file for each case along with the template. The README should give you
-a brief description for that particular case.
+a brief description of that particular case.
 
 Feel free to use either `aws cli` or AWS Console (Web UI) to deploy the templates. 
 
