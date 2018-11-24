@@ -8,10 +8,10 @@ a brief description for that particular case.
 Feel free to use either `aws cli` or AWS Console (Web UI) to deploy the templates. 
 
 ## Beanstalk
-1. [Secure Beanstalk application in private subned with RDS](aws/beanstalk/beanstalk-private-subnet-with-rds/README.md)
+1. [Beanstalk application and secure RDS instance in private subnet](aws/beanstalk/beanstalk-private-subnet-with-rds)
 
 ## EC2
-1. [Secure EC2 instance in private subnet with a bastion](aws/ec2/ec2-private-subnet-with-bastion/README.md)
+1. [Secure EC2 instance in private subnet with a bastion](aws/ec2/ec2-private-subnet-with-bastion)
 
 ## ECS
-1. [Secure ECS cluster in private subnet with serverless RDS cluster](aws/ecs/ecs-fargate-cluster-rds-serverless/README.md)
+1. [Secure ECS cluster in private subnet with serverless RDS cluster](aws/ecs/ecs-fargate-cluster-rds-serverless)
