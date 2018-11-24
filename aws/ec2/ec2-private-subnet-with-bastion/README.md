@@ -1,8 +1,8 @@
 # Secure EC2 instance in a private subnet with the bastion
 
 The template defines 
-- The secure EC2 instance in a private subnet
-- NAT gateway to private unidirectional access form a private 
+- Secure EC2 instance in a private subnet
+- The NAT gateway to provide unidirectional access form a private 
 subnet to the internet for secured resources
-- Bastion instance to setup ssh tunnel to secured instance 
-- Routes and security groups for all resources to control open ports and traffic to/from VPN resources 
+- A bastion instance to setup ssh tunnel to the secured instance 
+- Routes and security groups for all resources to control open ports and traffic to/from VPC resources 
