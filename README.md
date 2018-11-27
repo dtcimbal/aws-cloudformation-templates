@@ -21,4 +21,4 @@ Feel free to use either `aws cli` or AWS Console (Web UI) to deploy the template
 1. [RDS serverless cluster](aws/rds/rds-cluster-severless)
 
 ## Transcribe
-1. [Transcribe speech](aws/transcribe)
+1. [Speech transcription](aws/transcribe/transcribe-voice)
