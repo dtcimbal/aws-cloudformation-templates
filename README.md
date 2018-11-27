@@ -19,3 +19,6 @@ Feel free to use either `aws cli` or AWS Console (Web UI) to deploy the template
 ## RDS
 1. [RDS cluster in a private subnet](aws/rds/rds-cluster-in-private-subnet)
 1. [RDS serverless cluster](aws/rds/rds-cluster-severless)
+
+## Transcribe
+1. [Transcribe speech](aws/transcribe)
