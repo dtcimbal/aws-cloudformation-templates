@@ -1,7 +1,6 @@
 import org.gradle.internal.os.OperatingSystem
 
 apply plugin: 'org.springframework.boot'
-apply plugin: 'com.moowork.node'
 
 dependencies {
     compile "org.springframework.boot:spring-boot-devtools"
@@ -18,11 +17,6 @@ if (project.hasProperty('tls')) {
 
 bootRun {
     args = []
-}
-
-task webpackBuildDev(type: NpmTask, dependsOn: 'npm_install') {
-    onlyIf { shouldWebpackRun() == true }
-    args = ["run", "webpack:build"]
 }
 
 war {
@@ -45,12 +39,5 @@ processResources {
     }
 }
 
-processResources.dependsOn webpackBuildDev
 copyIntoStatic.dependsOn processResources
 bootJar.dependsOn copyIntoStatic
-
-yarn_install.onlyIf { shouldWebpackRun() == true }
-
-def shouldWebpackRun() {
-    file('build/www/app/main.bundle.js').exists() == false || project.hasProperty('webpack')
-}
